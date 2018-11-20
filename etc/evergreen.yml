@@ -406,7 +406,7 @@ variables:
   - func: "get modified patch files"
   # NOTE: To disable the compile bypass feature, comment out the next line.
   #
-  - func: "bypass compile and fetch binaries"
+  #- func: "bypass compile and fetch binaries"
   - func: "update bypass expansions"
   - func: "get buildnumber"
   - func: "set up credentials"
@@ -787,7 +787,9 @@ functions:
         ${activate_virtualenv}
         bin_ver=$($python -c "import yaml; print(yaml.safe_load(open('compile_expansions.yml'))['version']);" | tr -d '[ \r\n]')
         # Due to SERVER-23810, we cannot use $mongo_binary --quiet --nodb --eval "version();"
-        mongo_ver=$($mongo_binary --version | perl -pe '/version v(.*)$/; $_ = $1;' | tr -d '[ \r\n]')
+        # mongo_ver=$($mongo_binary --version | perl -pe '/version v(.*)$/; $_ = $1;' | tr -d '[ \r\n]')
+        # SPLUNK
+        mongo_ver=$(LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/opt/openssl/lib $mongo_binary --version | perl -pe '/version v(.*)$/; $_ = $1;' | tr -d '[ \r\n]')
         # The versions must match
         if [ "$bin_ver" != "$mongo_ver" ]; then
           echo "The mongo version is $mongo_ver, expected version is $bin_ver"
@@ -1164,7 +1166,8 @@ functions:
         # these default values in the distro config in evergreen.
 
         ${activate_virtualenv}
-        prune_scons_cache="$python buildscripts/scons_cache_prune.py --cache-dir ${scons_cache_path} --cache-size ${scons_cache_size|200} --prune-ratio ${scons_prune_ratio|0.8}"
+        # SPLUNK - force to use toolchain python
+        prune_scons_cache="/opt/mongodbtoolchain/v2/bin/python2 buildscripts/scons_cache_prune.py --cache-dir ${scons_cache_path} --cache-size ${scons_cache_size|200} --prune-ratio ${scons_prune_ratio|0.8}"
         if [ "${scons_cache_scope}" = "shared" ]; then
             if [ "${shared_scons_pruning}" = "true" ] && [ "${is_patch}" != "true" ]; then
               echo "shared_scons_pruning is set to true, checking last prune time"
@@ -1214,7 +1217,9 @@ functions:
             set -o igncr
         fi;
 
-        sed -i.bak "s/built-without-version-string/$(git describe)/" common/options/options.go
+        #sed -i.bak "s/built-without-version-string/$(git describe)/" common/options/options.go
+        # SPLUNK
+        sed -i.bak "s/built-without-version-string/4.0.4-splunk/" common/options/options.go
         sed -i.bak "s/built-without-git-spec/$(git rev-parse HEAD)/" common/options/options.go
 
         . ./${set_tools_gopath|set_gopath.sh}
@@ -1484,6 +1489,7 @@ functions:
             extra_args="$extra_args --tagFile=etc/test_retrial.yml"
           fi
 
+          # SPLUNK add ${ld_library_path}
           # The "resmoke_wrapper" expansion is used by the 'burn_in_tests' task to wrap the resmoke.py
           # invocation. It doesn't set any environment variables and should therefore come last in
           # this list of expansions.
@@ -1495,6 +1501,7 @@ functions:
               ${lang_environment}                         \
               ${san_options}                              \
               ${san_symbolizer}                           \
+              ${ld_library_path}                          \
               ${snmp_config_path}                         \
               ${resmoke_wrapper}                          \
               $python buildscripts/evergreen_run_tests.py \
@@ -1587,12 +1594,14 @@ functions:
         set -o verbose
 
         # We get the raw version string (r1.2.3-45-gabcdef) from git
-        MONGO_VERSION=$(git describe)
+        # MONGO_VERSION=$(git describe)
+        # SPLUNK
+        MONGO_VERSION=4.0.4-splunk
         # If this is a patch build, we add the patch version id to the version string so we know
         # this build was a patch, and which evergreen task it came from
-        if [ "${is_patch}" = "true" ] && [ "${bypass_compile|false}" = "false" ]; then
-          MONGO_VERSION="$MONGO_VERSION-patch-${version_id}"
-        fi
+        #if [ "${is_patch}" = "true" ] && [ "${bypass_compile|false}" = "false" ]; then
+        #  MONGO_VERSION="$MONGO_VERSION-patch-${version_id}"
+        #fi
 
         ${activate_virtualenv}
         # shared scons cache testing
@@ -1634,6 +1643,8 @@ functions:
           # Proceed with regular expansions generated
           # This script converts the generated version string into a sanitized version string for
           # use by scons and uploading artifacts as well as information about for the scons cache.
+          # Splunk since we are using a virtualenv from the toolchain now
+          pip install pyyaml
           MONGO_VERSION=$MONGO_VERSION SCONS_CACHE_MODE=${scons_cache_mode|nolinked} USE_SCONS_CACHE=${use_scons_cache|false} ${python|/opt/mongodbtoolchain/v2/bin/python2} buildscripts/generate_compile_expansions.py --out compile_expansions.yml
         fi
 
@@ -1810,7 +1821,9 @@ functions:
           set -o errexit
           echo "jstestfuzz self-tests finished"
 
-          npm run ${npm_command|jstestfuzz} -- --jsTestsDir ../jstests ${jstestfuzz_vars}
+          # npm run ${npm_command|jstestfuzz} -- --jsTestsDir ../jstests ${jstestfuzz_vars}
+          # SPLUNK
+          LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/opt/openssl/lib npm run ${npm_command|jstestfuzz} -- --jsTestsDir ../jstests ${jstestfuzz_vars}
 
     - command: archive.targz_pack
       params:
@@ -10358,7 +10371,7 @@ buildvariants:
 ###########################################
 
 - name: osx-1010
-  display_name: macOS 10.10
+  display_name: macOS 10.10 SPLUNK
   run_on:
   - macos-1012
   batchtime: 1440 # 1 day
@@ -10369,7 +10382,10 @@ buildvariants:
     push_name: osx-ssl
     push_arch: x86_64
     compile_env: DEVELOPER_DIR=/Applications/Xcode8.3.app
-    compile_flags: --ssl -j$(sysctl -n hw.logicalcpu) --release --libc++ CCFLAGS="-mmacosx-version-min=10.11" LINKFLAGS="-mmacosx-version-min=10.11"
+    #compile_flags: --ssl -j$(sysctl -n hw.logicalcpu) --release --libc++ CCFLAGS="-mmacosx-version-min=10.11" LINKFLAGS="-mmacosx-version-min=10.11"
+    # SPLUNK
+    ld_library_path: LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/opt/openssl/lib
+    compile_flags: --ssl -j$(sysctl -n hw.logicalcpu) --release --libc++ CCFLAGS="-mmacosx-version-min=10.11" LINKFLAGS="-mmacosx-version-min=10.11" LIBPATH="/usr/local/opt/openssl/lib" CPPPATH="/usr/local/opt/openssl/include" --ssl-provider=openssl
     num_jobs_available: 1
     gorootvars: 'PATH="/usr/local/go1.8/go/bin:/opt/mongodbtoolchain/v2/bin/:$PATH" GOROOT=/usr/local/go1.8/go CGO_CPPFLAGS=-I/opt/mongodbtoolchain/v2/include CGO_CFLAGS=-mmacosx-version-min=10.11 CGO_LDFLAGS=-mmacosx-version-min=10.11'
     tooltags: "-tags 'ssl openssl_pre_1.0'"
@@ -10378,6 +10394,8 @@ buildvariants:
   - *unittests
   tasks:
   - name: compile_all_run_unittests_TG
+    distros:
+    - macos-1012-splunk
   - name: aggregation
   - name: aggregation_mongos_passthrough
   - name: aggregation_one_shard_sharded_collections
